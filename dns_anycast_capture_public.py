@@ -337,13 +337,38 @@ def main():
         if len(unique_ips) > 1:
             print(f"  *** DNS returned different IPs across iterations — anycast rotation observed ***")
 
-        print(f"  DNS latency  avg / max      : {sum(dns_samples)/len(dns_samples):.1f} ms  /  {max(dns_samples):.1f} ms")
+        dns_avg = sum(dns_samples) / len(dns_samples)
+        dns_max = max(dns_samples)
+        print(f"  DNS latency  avg / max      : {dns_avg:.1f} ms  /  {dns_max:.1f} ms")
         if tcp_samples:
-            print(f"  TCP-443 latency avg / max   : {sum(tcp_samples)/len(tcp_samples):.1f} ms  /  {max(tcp_samples):.1f} ms")
+            tcp_avg = sum(tcp_samples) / len(tcp_samples)
+            tcp_max = max(tcp_samples)
+            print(f"  TCP-443 latency avg / max   : {tcp_avg:.1f} ms  /  {tcp_max:.1f} ms")
+
+        # ── Anomaly flags ─────────────────────────────────────────────────────
+        # 1. Mid-session anycast IP rotation (consecutive-iteration check)
+        ip_seq    = [r["ip"] for r in all_results]
+        rotations = [i + 1 for i in range(1, len(ip_seq)) if ip_seq[i] != ip_seq[i - 1]]
+        if rotations:
+            print(f"  *** Mid-session anycast IP change detected at iteration(s): "
+                  f"{', '.join(str(x) for x in rotations)}")
+            print(f"      Possible BGP instability or inter-PoP load balancing "
+                  f"within the capture window ***")
+
+        # 2. DNS latency disproportionate to TCP (DNS avg > 1.5 × TCP avg)
+        if tcp_samples and dns_avg > 1.5 * tcp_avg:
+            print(f"  *** DNS avg ({dns_avg:.1f} ms) is {dns_avg / tcp_avg:.1f}\u00d7 TCP avg ({tcp_avg:.1f} ms) \u2014")
+            print(f"      DNS resolution path may be suboptimal relative to transport path ***")
+
+        # 3. High DNS latency variance (max > 2 × avg)
+        if dns_max > 2.0 * dns_avg:
+            print(f"  *** DNS latency variance high: max ({dns_max:.1f} ms) = "
+                  f"{dns_max / dns_avg:.1f}\u00d7 avg ({dns_avg:.1f} ms) \u2014")
+            print(f"      Suggests inconsistent anycast node selection across iterations ***")
 
         print()
         print("  If all traceroute hops show '*', ICMP is filtered by your network or VPN.")
-        print("  Please include the following in your Azure WAN support case:")
+        print("  When sharing this output, include:")
         print("   • This output file")
         print("   • Your ISP name and AS number (check https://bgp.he.net)")
         print("   • Your approximate location (city/country)")
